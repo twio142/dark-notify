@@ -1,0 +1,60 @@
+name: Build
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      SHA256:
+        description: "SHA256 checksum of the built artifact"
+        value: ${{ jobs.build.outputs.SHA256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    outputs:
+      SHA256: ${{ steps.checksum.outputs.SHA256 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-build-
+      - name: Build
+        run: cargo build --release
+
+      - name: Archive
+        run: tar -czvf dark-notify-arm64.tar.gz -C target/release/ dark-notify
+
+      - name: Calculate SHA256 checksum
+        id: checksum
+        run: |
+          SHA256=$(shasum -a 256 dark-notify-arm64.tar.gz | cut -d' ' -f1)
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        id: upload-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dark-notify-arm64.tar.gz
+          path: dark-notify-arm64.tar.gz

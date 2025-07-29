@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-mod"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      ASSET_URL: ${{ steps.get_url.outputs.ASSET_URL }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dark-notify-arm64.tar.gz
+          path: ./
+
+      - name: Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            dark-notify-arm64.tar.gz
+          fail_on_unmatched_files: true
+
+      - name: Get asset URL
+        id: get_url
+        run: |
+          ASSET_URL="${{ fromJson(steps.release.outputs.assets)[0].browser_download_url }}"
+          echo "ASSET_URL=$ASSET_URL" >> $GITHUB_OUTPUT
+
+  update-homebrew-tap:
+    needs: [build, release]
+    runs-on: macos-latest
+    steps:
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION=${{ github.ref_name }}
+          brew tap twio142/homebrew-tap
+          brew bump-formula-pr \
+            --version="${VERSION#v}" \
+            --url="${{ needs.release.outputs.ASSET_URL }}" \
+            --sha256="${{ needs.build.outputs.SHA256 }}" \
+            twio142/homebrew-tap/dark-notify
